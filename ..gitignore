@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual env
+venv/
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Airflow
+airflow/logs/
+
+# Spark
+spark-warehouse/
+
+# Hadoop
+hdfs/data/
+
+# PostgreSQL
+postgres/data/
+
+# Docker
+*.log
+
+# VS Code
+.vscode/
+
+# Windows
+Thumbs.db
+Desktop.ini
