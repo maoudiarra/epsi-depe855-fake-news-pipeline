@@ -1,18 +1,13 @@
+"""count_news.py - Compte les news par statut."""
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from config import DB_CONFIG
 import psycopg
 
-conn = psycopg.connect(
-    host="127.0.0.1",
-    port=5433,
-    dbname="news_db",
-    user="admin",
-    password="admin123"
-)
-
-cur = conn.cursor()
-
-cur.execute("SELECT COUNT(*) FROM news")
-
-print("Nombre de news :", cur.fetchone()[0])
-
-cur.close()
-conn.close()
+conn = psycopg.connect(**DB_CONFIG)
+cur  = conn.cursor()
+cur.execute("SELECT verification_status, COUNT(*) FROM news GROUP BY verification_status")
+print("=== Bilan des news ===")
+for status, count in cur.fetchall():
+    print(f"  {status}: {count}")
+cur.close(); conn.close()

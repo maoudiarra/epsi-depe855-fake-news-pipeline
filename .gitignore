@@ -1,33 +1,40 @@
+# Environnement
+.env
+*.env
+
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
-
-# Virtual env
+*.pyd
+.Python
+env/
 venv/
-.env
+.venv/
+*.egg-info/
+dist/
+build/
+.eggs/
 
-# Jupyter
-.ipynb_checkpoints/
+# ML model (fichier binaire lourd)
+ml/model.pkl
 
-# Airflow
+# Données brutes (potentiellement sensibles)
+data/raw/
+data/processed/
+data/archive/
+
+# Logs
 airflow/logs/
-
-# Spark
-spark-warehouse/
-
-# Hadoop
-hdfs/data/
-
-# PostgreSQL
-postgres/data/
-
-# Docker
 *.log
 
-# VS Code
+# IDE
 .vscode/
+.idea/
+*.swp
 
-# Windows
+# OS
+.DS_Store
 Thumbs.db
-Desktop.ini
+
+check_env.py

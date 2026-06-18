@@ -1,32 +1,13 @@
+"""init_database.py - Crée les tables manuellement si besoin."""
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from config import DB_CONFIG
 import psycopg
 
-conn = psycopg.connect(
-    host="127.0.0.1",
-    port=5433,
-    dbname="news_db",
-    user="admin",
-    password="admin123"
-)
-
-cur = conn.cursor()
-
-cur.execute("""
-CREATE TABLE IF NOT EXISTS news (
-    id SERIAL PRIMARY KEY,
-    title TEXT NOT NULL,
-    summary TEXT,
-    source VARCHAR(100),
-    publication_date TIMESTAMP,
-    event_date TIMESTAMP,
-    label VARCHAR(20),
-    confidence_score FLOAT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)
-""")
-
+conn = psycopg.connect(**DB_CONFIG)
+cur  = conn.cursor()
+with open(os.path.join(os.path.dirname(__file__), "init.sql")) as f:
+    cur.execute(f.read())
 conn.commit()
-
-print("Table news créée avec succès")
-
-cur.close()
-conn.close()
+print("Tables créées avec succès.")
+cur.close(); conn.close()
