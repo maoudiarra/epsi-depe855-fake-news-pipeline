@@ -42,5 +42,28 @@ services:
       - ./postgres/initdb:/docker-entrypoint-initdb.d
     restart: unless-stopped
 
+  spark:
+    image: apache/spark:3.5.1
+    container_name: spark
+    user: root
+    entrypoint: /bin/bash
+    command: ["-c", "tail -f /dev/null"]
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./spark:/opt/spark-jobs
+      - ./spark/jars:/opt/spark/jars/extra
+      - spark_output:/opt/spark-output
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
 volumes:
   postgres_data:
+  spark_output:
