@@ -1,11 +1,10 @@
 """
 pipeline_dag.py - DAG Airflow DEPE855
 Orchestre le pipeline complet toutes les 6 heures.
-Les credentials sont lus depuis les variables d'environnement Airflow
-(définies dans l'interface Airflow > Admin > Variables ou via .env).
 """
 
 import os
+import json
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
@@ -19,9 +18,8 @@ default_args = {
     "retry_delay": timedelta(minutes=5),
 }
 
-# ── Helpers config ────────────────────────────────────────────────────────────
+
 def _db_config() -> dict:
-    """Lit la config DB depuis les variables d'environnement Airflow."""
     return {
         "host":     os.environ["POSTGRES_HOST"],
         "port":     int(os.environ["POSTGRES_PORT"]),
@@ -30,18 +28,40 @@ def _db_config() -> dict:
         "password": os.environ["POSTGRES_PASSWORD"],
     }
 
-def _kafka_config() -> tuple[str, str]:
+
+def _kafka_config() -> tuple:
     return os.environ["KAFKA_BOOTSTRAP"], os.environ["KAFKA_TOPIC"]
 
 
-# ── Tâche 1 : Scraping + production Kafka ────────────────────────────────────
+def _safe_import_kafka():
+    """
+    Importe KafkaProducer/KafkaConsumer en s'assurant que le dossier
+    kafka/ du projet ne masque pas la librairie kafka-python.
+    """
+    import sys
+    # Retirer temporairement /opt/airflow/project du path pour éviter
+    # que le dossier kafka/ du projet masque la librairie kafka-python
+    project_paths = [p for p in sys.path if "project" in p]
+    for p in project_paths:
+        sys.path.remove(p)
+
+    from kafka import KafkaProducer, KafkaConsumer
+
+    # Remettre les chemins projet pour les scrapers et ML
+    sys.path = project_paths + sys.path
+    return KafkaProducer, KafkaConsumer
+
+
+# ── Tâche 1 : Scraping + production Kafka ─────────────────────────────────────
 def task_scrape_and_produce(**context):
-    import sys, json
-    sys.path.insert(0, "/opt/airflow")
-    from scraper.afp_scraper    import scrape as scrape_afp
+    import sys
+    sys.path.insert(0, "/opt/airflow/project")
+
+    from scraper.afp_scraper     import scrape as scrape_afp
     from scraper.lemonde_scraper import scrape as scrape_lemonde
     from scraper.gorafi_scraper  import scrape as scrape_gorafi
-    from kafka import KafkaProducer
+
+    KafkaProducer, _ = _safe_import_kafka()
 
     bootstrap, topic = _kafka_config()
     producer = KafkaProducer(
@@ -53,18 +73,19 @@ def task_scrape_and_produce(**context):
         producer.send(topic, value=article)
     producer.flush()
     producer.close()
-    print(f"[DAG] {len(all_news)} articles produits.")
+    print(f"[DAG] ✅ {len(all_news)} articles produits dans Kafka.")
     return len(all_news)
 
 
-# ── Tâche 2 : Consommation Kafka → PostgreSQL ────────────────────────────────
+# ── Tâche 2 : Consommation Kafka → PostgreSQL ──────────────────────────────────
 def task_consume_and_store(**context):
-    import sys, json
-    import psycopg
-    from kafka import KafkaConsumer
+    import sys
+    sys.path.insert(0, "/opt/airflow/project")
 
-    sys.path.insert(0, "/opt/airflow")
+    import psycopg
     from ml.predict import predict_fake_news
+
+    _, KafkaConsumer = _safe_import_kafka()
 
     bootstrap, topic = _kafka_config()
     consumer = KafkaConsumer(
@@ -72,7 +93,7 @@ def task_consume_and_store(**context):
         bootstrap_servers=bootstrap,
         auto_offset_reset="earliest",
         group_id=f"airflow-{datetime.utcnow().strftime('%Y%m%d%H%M')}",
-        consumer_timeout_ms=15000,
+        consumer_timeout_ms=20000,
         value_deserializer=lambda x: json.loads(x.decode("utf-8")),
     )
 
@@ -83,9 +104,12 @@ def task_consume_and_store(**context):
     for msg in consumer:
         news = msg.value
         if news.get("confidence_score") is None:
-            label, score = predict_fake_news(news.get("title",""), news.get("summary",""))
+            label, score = predict_fake_news(
+                news.get("title", ""), news.get("summary", "")
+            )
             news["verification_status"] = label
             news["confidence_score"]    = score
+
         cur.execute("""
             INSERT INTO news (
                 news_uid, title, summary, source,
@@ -106,14 +130,17 @@ def task_consume_and_store(**context):
         conn.commit()
         inserted += 1
 
-    cur.close(); conn.close(); consumer.close()
-    print(f"[DAG] {inserted} articles traités.")
+    cur.close()
+    conn.close()
+    consumer.close()
+    print(f"[DAG] ✅ {inserted} articles traités.")
     return inserted
 
 
-# ── Tâche 3 : Contrôle intégrité ─────────────────────────────────────────────
+# ── Tâche 3 : Contrôle intégrité ──────────────────────────────────────────────
 def task_check_integrity(**context):
     import psycopg
+
     conn = psycopg.connect(**_db_config())
     cur  = conn.cursor()
     cur.execute("""
@@ -121,16 +148,23 @@ def task_check_integrity(**context):
         FROM news
         WHERE processing_date >= NOW() - INTERVAL '7 hours'
         GROUP BY verification_status
+        ORDER BY verification_status
     """)
     rows = cur.fetchall()
-    cur.close(); conn.close()
+    cur.close()
+    conn.close()
+
     print("[DAG] Bilan du run :")
+    total = 0
     for status, count in rows:
-        print(f"  {status}: {count}")
+        icon = {"verified": "✅", "fake": "❌", "pending": "⏳"}.get(status, "?")
+        print(f"  {icon} {status}: {count}")
+        total += count
+    print(f"  TOTAL: {total}")
     return dict(rows)
 
 
-# ── Définition du DAG ─────────────────────────────────────────────────────────
+# ── Définition du DAG ──────────────────────────────────────────────────────────
 with DAG(
     dag_id="depe855_news_pipeline",
     default_args=default_args,
